@@ -97,8 +97,13 @@ firecracker-host-app:
               content: |
                 # A TAP-backed guest is a ROUTER's neighbour: without forwarding the host cannot pass a
                 # packet between the guest and the uplink, and the guest boots into a network it cannot
-                # reach. Measured on the host that filed this integration's WI-6: the forwarding POLICY
-                # was DROP while ip_forward was already 1 — so both are set here, and both are asserted.
+                # reach. THIS FILE SETS THE SYSCTL, and the plan's check asserts that value.
+                #
+                # The other half of the WI-6 finding — that host's forwarding POLICY was DROP while
+                # ip_forward was already 1 — is a packet-filter VERDICT, not a sysctl: a drop-in cannot
+                # set it, and on that host ip_forward was already correct, so this recipe would not have
+                # fixed that condition either. The FORWARD/NAT rules are the network half, filed as
+                # opencharly/layer-firecracker#3, and nothing here claims otherwise.
                 net.ipv4.ip_forward = 1
             - run: apply the sysctl now, not only at the next boot
               id: firecracker-ip-forward-apply

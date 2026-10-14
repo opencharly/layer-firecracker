@@ -45,9 +45,11 @@ That installs the pinned VMM + kernel and applies the posture:
   you export it, else the account that invoked the deploy (`SUDO_USER`); when that resolves to root no
   group is needed and the check says so instead of pretending. A world-writable `/dev/kvm` lets any
   local process reach every guest's memory and the host kernel through it.
-- **IP forwarding is enabled**, both as a sysctl drop-in and applied immediately — a TAP-backed guest is
-  a router's neighbour, and the host that filed this integration's WI-6 had the forwarding *policy* at
-  `DROP` while `ip_forward` was already `1`, which is why the rule and the value are both written.
+- **IP forwarding is enabled**: `net.ipv4.ip_forward = 1` written as a sysctl drop-in, applied
+  immediately, and **asserted** by the plan. The *other* half of the WI-6 finding — that host's
+  forwarding **policy** sat at `DROP` while `ip_forward` was already `1` — is a packet-filter verdict
+  rather than a sysctl, so a drop-in cannot set it; those FORWARD/NAT rules are the deferred network
+  half (`#3`), and nothing here claims them.
 - **Self-gating and idempotent**: a target with no `/dev/kvm` prints why and skips rather than
   installing a rule that can never apply, and re-running changes nothing.
 
