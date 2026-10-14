@@ -1,3 +1,5 @@
 *.log
 .check/
 .build/
+# VM / disk-image build outputs (disk.qcow2, seed.iso, build stamps)
+image/

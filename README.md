@@ -1,8 +1,8 @@
 # layer-firecracker
 
 The **Firecracker microVM host layer** for charly: the pinned VMM, the kernel the pools boot, and the
-host posture a microVM needs — every artefact pinned, and every pin **asserted** so a substituted or
-truncated binary fails at check time rather than at boot.
+**host posture** a microVM needs — every artefact pinned, and every pin **asserted** so a substituted
+or truncated binary fails at check time rather than at boot.
 
 | Artefact | Pin |
 |---|---|
@@ -11,30 +11,51 @@ truncated binary fails at check time rather than at boot.
 | kernel shape | asserted to be the uncompressed **ELF** the VMM loads, never a distro `bzImage` |
 
 ```console
-$ charly box validate                 # the candy, the bed image and the bed
-$ charly check run check-firecracker-app   # the disposable R10 bed
+$ charly box validate                          # the candy, the bed image, the templates and the beds
+$ charly check run check-firecracker-app       # the ARTEFACT half, on a disposable pod
+$ charly check run check-firecracker-posture   # the HOST posture, inside a disposable VM
 ```
 
-## Why a microVM needs its own layer
+## Two halves, two beds — and why they are different targets
 
-Firecracker boots a guest with **no libvirt, no domain and no host arbiter lease** — which is exactly
-why the substrate reuses the `ssh` venue and declares **no** exclusive venue (an exclusive venue would
-make the kernel misroute the deploy into `charly vm build`/`charly vm create`). What it does need is a
-different set of host things:
+**The artefacts are container work; the posture is host work.** The artefact half installs files, so a
+pod proves it cheaply and the pod bed (`check-firecracker-app`) does exactly that.
 
-- the **VMM and its jailer**, pinned;
-- an uncompressed **ELF kernel** — the VMM loads it directly, so a distro `bzImage` is a guest that
-  never reaches its first instruction. The check asserts the ELF magic for that reason;
-- `/dev/kvm` reachable by the account that runs the VMM (a `kvm` group or an ACL — **not** a
-  world-writable `0666`);
-- a **TAP** device plus forwarding/NAT and `ip_forward` for `mode: tap`, or the pinned
-  `tc-redirect-tap` + conflist for `mode: cni`.
+The **posture** is udev rules, sysctls and packet-filter rules. Those have no meaning in an image build,
+and applying them to an operator's workstation uninvited is the one thing this layer must never do — so
+they live in a `kind: local` **host template** (`firecracker-host-app`) that a deploy applies
+deliberately, and the bed proves them by **nesting**: `check-firecracker-posture` boots a disposable VM
+and a nested `local:` member applies the template *inside the guest*. A bed never writes to your
+workstation.
 
-## What is proved, and where
+## Using it on a host
 
-The bed in this repo is a **disposable pod**: it proves the **artefact half** — the pins, the
-binaries, the kernel's ELF shape, the installed paths — cheaply and on a real deploy.
+```yaml
+my-microvm-host:
+  local:
+    from: firecracker-host-app
+    host: my-microvm-host.lan     # or `local` for this machine — deliberately
+```
 
-The **host posture** (KVM, TAP, forwarding, CNI) needs a real kernel and a real host, so it is applied
-by the `kind: local` deploy in this repo and proved on a **disposable VM**, never on an operator's
-workstation. Until that lands, the layer does not claim it.
+That installs the pinned VMM + kernel and applies the posture:
+
+- **`/dev/kvm` becomes group-accessible, never world-writable.** A `0660` node owned by group `kvm`,
+  written as a udev rule, with the account that will run the VMM added to the group and that
+  membership **asserted** by the plan's check. The account is resolved on the target: `FC_VMM_USER` if
+  you export it, else the account that invoked the deploy (`SUDO_USER`); when that resolves to root no
+  group is needed and the check says so instead of pretending. A world-writable `/dev/kvm` lets any
+  local process reach every guest's memory and the host kernel through it.
+- **IP forwarding is enabled**, both as a sysctl drop-in and applied immediately — a TAP-backed guest is
+  a router's neighbour, and the host that filed this integration's WI-6 had the forwarding *policy* at
+  `DROP` while `ip_forward` was already `1`, which is why the rule and the value are both written.
+- **Self-gating and idempotent**: a target with no `/dev/kvm` prints why and skips rather than
+  installing a rule that can never apply, and re-running changes nothing.
+
+## What is not proved yet
+
+Stated rather than implied, each with its own issue:
+
+- the **network half** of the posture — the NAT/FORWARD rules for `mode: tap` and the `mode: cni`
+  conflist with its pinned `tc-redirect-tap` plugin — is **opencharly/layer-firecracker#3**;
+- a **booted microVM inside the disposable guest** (the proof that ties the artefacts and the posture
+  together) is **opencharly/layer-firecracker#4**, and it depends on the plugin's launch capability.
