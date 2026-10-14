@@ -118,13 +118,20 @@ firecracker-host-app:
                 fi
                 MODE=$(stat -c '%a' /dev/kvm)
                 [ "$MODE" != "666" ] || { echo "/dev/kvm is world-writable ($MODE)"; exit 1; }
-                # Owner read+write AND group read+write: `66x`. The previous predicate also admitted
-                # 600 (owner-only), which is NOT group-accessible — a check looser than the claim it
-                # makes. 666 is already rejected above; anything below 660 cannot give the VMM's group
-                # access, and the udev rule above writes 0660 deterministically.
+                # The mode must be: owner read+write (6), group read+write (6), and NO write bit for
+                # anyone else — i.e. the third digit may be 0, 1, 4 or 5 (`r`, `rx`, `r`, `rx`), never
+                # 2, 3, 6 or 7.
+                #
+                # Both earlier forms of this predicate were looser than the claim it makes. `!= 666`
+                # rejected only the one spelling of the defect; `66[0-7]` then admitted 662, 663 and
+                # 667, which are all WORLD-WRITABLE through the other-write bit — the very posture this
+                # layer exists to replace, since a world-writable /dev/kvm lets any local process reach
+                # every guest's memory and the host kernel. The udev rule writes 0660 deterministically,
+                # so the posture itself was never wrong; the GATE was, and a gate that passes the defect
+                # it claims to catch is no gate at all.
                 case "$MODE" in
-                  66[0-7]) ;;
-                  *) echo "/dev/kvm mode $MODE does not grant the owning group read+write"; exit 1 ;;
+                  66[0145]) ;;
+                  *) echo "/dev/kvm mode $MODE is not owner-rw + group-rw with no other-write (world-writable or not group-accessible)"; exit 1 ;;
                 esac
 
                 # And the account that runs the VMM must actually BE in the group — the half of the
@@ -206,7 +213,8 @@ check-firecracker-vm:
 # never touched — which is the whole reason this bed is a VM and not a `host: local` deploy.
 #
 # What it does NOT yet prove, stated rather than implied: `mode: cni` (the pinned tc-redirect-tap
-# plugin + the conflist) and a BOOTED microVM inside the guest. Both are their own slices.
+# plugin + the conflist) is opencharly/layer-firecracker#3, and a BOOTED microVM inside the guest is
+# opencharly/layer-firecracker#4.
 # =============================================================================
 check-firecracker-posture:
     vm:
