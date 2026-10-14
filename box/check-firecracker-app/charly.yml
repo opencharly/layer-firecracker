@@ -1,0 +1,26 @@
+# check-firecracker-app — the disposable R10 bed IMAGE for layer-firecracker: a Fedora base
+# composing the host layer, so the pinned VMM, its jailer and the kernel artefact are installed onto
+# a REAL pod and asserted there.
+#
+# What this bed can and cannot prove, stated so it is never over-claimed: a pod has no /dev/kvm, so
+# it proves the ARTEFACT half (the pins, the binaries, the kernel's ELF shape, the paths). The HOST
+# posture — the /dev/kvm ACL, the TAP, forwarding/NAT, the CNI conflist — is root-scoped work on a
+# real host and is proved by the repo's `kind: local` deploy on a disposable VM (the next slice).
+check-firecracker-app:
+    candy:
+        description: |
+            Disposable bed image for the layer-firecracker R10 — a Fedora base composing the
+            firecracker host layer, so the pinned VMM + jailer and the fireactions kernel artefact
+            are installed and asserted on a real pod.
+        base: quay.io/fedora/fedora:43
+        candy:
+            - layer-firecracker
+        plan:
+            - check: the VMM installed by the composed layer answers --version
+              command: firecracker --version
+              exit_status: 0
+            - check: the jailer installed by the composed layer is on PATH
+              command: command -v jailer
+              exit_status: 0
+            - check: the kernel artefact the fireactions pools boot is present at the pools' own path
+              file: /var/lib/firecracker/kernels/5.10/vmlinux

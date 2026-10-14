@@ -1,0 +1,47 @@
+# charly.yml — unified project root for the firecracker host layer.
+#
+#   box/<name>/charly.yml   — one image per directory
+#   candy/<name>/charly.yml — one layer (candy) per directory
+#
+# Both directories are DISCOVERED, so the candy below is gated by `charly box validate` and by the
+# bed. The default distro/builder/init vocabulary is EMBEDDED in the charly binary; `defaults:` here
+# only extends it.
+
+discover:
+  - path: box
+    recursive: true
+  - path: candy
+    recursive: true
+
+defaults:
+  registry: ghcr.io/opencharly
+  tag: auto
+  platform:
+    - linux/amd64
+  build: [rpm]
+
+# =============================================================================
+# check-firecracker-app — the R10 bed for the host layer.
+#
+# A DISPOSABLE POD composing the bed image: the build installs the pinned VMM + jailer and the
+# fireactions kernel artefact, the deploy brings the pod up, `check live` runs the candy's checks
+# (the sha256 pins and the ELF-magic assertion) AND the image's own checks on the RUNNING pod, then
+# the fresh rebuild runs them again on the rebuilt image.
+#
+# It is deliberately a POD and not a VM: this half of the layer is artefact-only, and a container
+# proves it cheaply and honestly. The host posture (the /dev/kvm ACL rather than a world-writable
+# 0666, the TAP device, forwarding/NAT, `ip_forward`, and the `mode: cni` conflist with
+# `tc-redirect-tap`) needs a real kernel and a real host, so it lands with the `kind: local` template
+# in this repo and is proved on a DISPOSABLE VM — never on an operator's workstation.
+# =============================================================================
+check-firecracker-app:
+    pod:
+        image: check-firecracker-app
+        disposable: true
+        lifecycle: test
+        description: >-
+            The artefact half of the firecracker host layer on a real pod: the pinned firecracker
+            v1.17.0 VMM and its jailer installed and verified byte-for-byte against measured sha256
+            pins, and the fireactions 5.10 kernel artefact at the pools' own path, asserted to be the
+            uncompressed ELF the VMM loads rather than a distro bzImage. The host posture (KVM, TAP,
+            forwarding, CNI) is proved separately on a disposable VM, because a pod has no /dev/kvm.
