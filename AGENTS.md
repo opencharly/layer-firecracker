@@ -1,8 +1,10 @@
 # AGENTS.md — layer-firecracker
 
 The **Firecracker microVM host layer**: the pinned VMM + jailer, the kernel artefact the fireactions
-pools boot, and the host posture a microVM needs — group-based `/dev/kvm` access, IP forwarding, and
-(coming) the NAT/FORWARD rules plus the `mode: cni` conflist.
+pools boot, and the host posture a microVM needs — group-based `/dev/kvm` access with asserted
+membership, and IP forwarding. The network half of the posture (NAT/FORWARD for `mode: tap`, and the
+`mode: cni` conflist with its pinned plugin) is **opencharly/layer-firecracker#3**; a booted microVM
+inside the guest is **opencharly/layer-firecracker#4**. Neither is described as if it were here.
 
 ## Canonical files
 
@@ -10,7 +12,10 @@ pools boot, and the host posture a microVM needs — group-based `/dev/kvm` acce
   that ASSERT every pin.
 - `box/check-firecracker-app/charly.yml` — the disposable R10 bed IMAGE for the artefact half.
 - `charly.yml` — the project manifest: `firecracker-host-app` (the posture template),
-  `check-firecracker-vm` (the disposable guest), and the two beds.
+  `check-firecracker-vm` (the **guest entity** the posture bed boots — a reusable `kind: vm`, never
+  deployed on its own, so it carries no `disposable:`), and the two beds:
+  `check-firecracker-app` (the artefact half, a pod) and `check-firecracker-posture` (the posture,
+  inside a disposable VM).
 - `.github/workflows/tag-on-merge.yml` — CalVer tag + `CHANGELOG/` on merge.
 
 ## Load these skills first (R0)

@@ -40,8 +40,11 @@ my-microvm-host:
 That installs the pinned VMM + kernel and applies the posture:
 
 - **`/dev/kvm` becomes group-accessible, never world-writable.** A `0660` node owned by group `kvm`,
-  written as a udev rule, with the VMM's account added to the group. A world-writable `/dev/kvm` lets
-  any local process reach every guest's memory and the host kernel through it.
+  written as a udev rule, with the account that will run the VMM added to the group and that
+  membership **asserted** by the plan's check. The account is resolved on the target: `FC_VMM_USER` if
+  you export it, else the account that invoked the deploy (`SUDO_USER`); when that resolves to root no
+  group is needed and the check says so instead of pretending. A world-writable `/dev/kvm` lets any
+  local process reach every guest's memory and the host kernel through it.
 - **IP forwarding is enabled**, both as a sysctl drop-in and applied immediately — a TAP-backed guest is
   a router's neighbour, and the host that filed this integration's WI-6 had the forwarding *policy* at
   `DROP` while `ip_forward` was already `1`, which is why the rule and the value are both written.
@@ -50,5 +53,9 @@ That installs the pinned VMM + kernel and applies the posture:
 
 ## What is not proved yet
 
-Stated rather than implied: **`mode: cni`** (the pinned `tc-redirect-tap` plugin plus the conflist) and
-a **booted microVM inside the guest**. Both are their own slices; the ledger carries them.
+Stated rather than implied, each with its own issue:
+
+- the **network half** of the posture — the NAT/FORWARD rules for `mode: tap` and the `mode: cni`
+  conflist with its pinned `tc-redirect-tap` plugin — is **opencharly/layer-firecracker#3**;
+- a **booted microVM inside the disposable guest** (the proof that ties the artefacts and the posture
+  together) is **opencharly/layer-firecracker#4**, and it depends on the plugin's launch capability.

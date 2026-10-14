@@ -41,8 +41,10 @@ firecracker-host-app:
             allow_root_tasks: true
         description: |-
             The firecracker host posture: the pinned VMM and kernel (from layer-firecracker), then
-            group-based access to /dev/kvm instead of a world-writable device, IP forwarding, and the
-            NAT/FORWARD rules a TAP-backed guest needs to reach the network.
+            group-based access to /dev/kvm instead of a world-writable device, and IP forwarding.
+            The NETWORK half of the posture — the NAT/FORWARD rules a TAP-backed guest needs, and the
+            `mode: cni` conflist with its pinned plugin — is NOT in this recipe yet; it is tracked as
+            opencharly/layer-firecracker#3 rather than described as if it were here.
         plan:
             - run: create the kvm group and give the VMM's account access to /dev/kvm — NOT 0666
               id: firecracker-kvm-access
@@ -55,8 +57,20 @@ firecracker-host-app:
                   exit 0
                 fi
                 getent group kvm >/dev/null 2>&1 || groupadd --system kvm
-                if [ -n "${FC_VMM_USER:-}" ] && [ "${FC_VMM_USER}" != root ] && id "${FC_VMM_USER}" >/dev/null 2>&1; then
-                  usermod -aG kvm "${FC_VMM_USER}"
+
+                # The account that will run the VMM: named explicitly, else the account that invoked
+                # this deploy (SUDO_USER on the target), else nothing. The claim "the VMM's account is
+                # in the group" is only true when this resolves to a real account, and the check below
+                # asserts exactly that — a guard that can never fire is a claim with nothing behind it.
+                VMM_USER="${FC_VMM_USER:-${SUDO_USER:-}}"
+                if [ -z "${VMM_USER}" ] || [ "${VMM_USER}" = root ]; then
+                  echo "no non-root VMM account to add (root needs no group); set FC_VMM_USER to name one"
+                elif id "${VMM_USER}" >/dev/null 2>&1; then
+                  usermod -aG kvm "${VMM_USER}"
+                  echo "added ${VMM_USER} to group kvm"
+                else
+                  echo "FC_VMM_USER=${VMM_USER} does not exist on this target" >&2
+                  exit 1
                 fi
                 if command -v udevadm >/dev/null 2>&1; then
                   udevadm control --reload-rules
@@ -108,6 +122,15 @@ firecracker-host-app:
                   6[0-9][0-9]|6[0-7]0) ;;
                   *) echo "/dev/kvm mode $MODE does not grant the owning group access"; exit 1 ;;
                 esac
+
+                # And the account that runs the VMM must actually BE in the group — the half of the
+                # posture a mode check cannot see.
+                VMM_USER="${FC_VMM_USER:-${SUDO_USER:-}}"
+                if [ -z "${VMM_USER}" ] || [ "${VMM_USER}" = root ]; then
+                  echo "no non-root VMM account to assert (root has access already)"
+                  exit 0
+                fi
+                id -nG "${VMM_USER}" | tr ' ' '\n' | grep -qx kvm || { echo "${VMM_USER} is not in group kvm"; exit 1; }
               context: [deploy]
             - check: IP forwarding is on
               id: firecracker-ip-forward-on
@@ -117,7 +140,10 @@ firecracker-host-app:
               context: [deploy]
 
 # =============================================================================
-# check-firecracker-vm — the disposable guest the posture bed runs INSIDE.
+# check-firecracker-vm — the GUEST ENTITY the posture bed boots. It is a reusable kind:vm entity, not
+# a bed: it carries no `disposable:` because it is never deployed on its own. The BED that uses it
+# (check-firecracker-posture) is the one marked `disposable: true`, and that marking is what authorizes
+# the VM's rebuild and teardown.
 #
 # Nesting is the point: the posture must never be applied to an operator's workstation by a bed, and a
 # nested `local:` deploy confines every write to this guest (the canonical pattern — see
@@ -125,6 +151,25 @@ firecracker-host-app:
 # anything, which is why the CPU mode matters: the renderer defaults to `host-passthrough`, and the
 # host enables nested KVM, so a microVM can be run inside this disposable VM.
 # =============================================================================
+# =============================================================================
+# check-firecracker-app — the R10 bed for the ARTEFACT half, on a disposable POD.
+#
+# Restored after a scripted rewrite of this file dropped it while the docs kept telling readers to run
+# it: a bed that a README names must exist, and the artefact half deserves its own witness. A pod is
+# the right target for it — the artefacts are files, so no kernel and no /dev/kvm are involved.
+# =============================================================================
+check-firecracker-app:
+    pod:
+        image: check-firecracker-app
+        disposable: true
+        lifecycle: test
+        description: >-
+            The artefact half of the firecracker host layer on a real pod: the pinned firecracker
+            v1.17.0 VMM and its jailer installed and verified byte-for-byte against measured sha256
+            pins, and the fireactions 5.10 kernel artefact at the pools' own path, asserted to be the
+            uncompressed ELF the VMM loads rather than a distro bzImage. The host posture (KVM, TAP,
+            forwarding, CNI) is proved separately on a disposable VM, because a pod has no /dev/kvm.
+
 check-firecracker-vm:
     vm:
         source:
